@@ -51,16 +51,16 @@ SERVER_IP=$(get_public_ip)
 echo "✅ 服务器 IP: $SERVER_IP"
 
 #------------------------------------------------------------
-# 2. 智能端口选择逻辑
+# 2. 端口配置（完全依赖环境变量）
 #------------------------------------------------------------
 if [ -n "$PORT" ]; then
-    # Railway/ClawCloud 等平台会设置 PORT 环境变量
+    # 使用环境变量指定的端口
     PROXY_PORT=$PORT
-    echo "✅ 检测到平台端口变量: $PROXY_PORT"
+    echo "✅ 使用环境变量端口: $PROXY_PORT"
 else
-    # 自动生成随机端口 (30000-50000)
-    PROXY_PORT=$((30000 + RANDOM % 20001))
-    echo "🎲 自动生成随机端口: $PROXY_PORT"
+    # 使用默认固定端口（标准代理端口）
+    PROXY_PORT=3128
+    echo "⚠️  未设置 PORT 环境变量，使用默认端口: $PROXY_PORT"
 fi
 
 #------------------------------------------------------------
@@ -126,20 +126,32 @@ echo "========================================"
 echo "  ✨ 3proxy 服务配置完成"
 echo "========================================"
 echo ""
-echo "📌 监听端口: $PROXY_PORT"
+echo "📌 容器内监听端口: $PROXY_PORT"
 echo "📌 服务器IP: $SERVER_IP"
 echo ""
-echo "📋 节点列表（格式: IP:端口:用户名:密码）:"
+echo "⚠️  ClawCloud 用户重要提示："
+echo "   1. 3proxy 在容器内监听端口: $PROXY_PORT"
+echo "   2. 请在 ClawCloud 后台查看【端口映射】中的【公网端口】"
+echo "   3. 使用节点时必须使用【公网端口】，不是 $PROXY_PORT"
+echo ""
+echo "📋 节点格式: IP:公网端口:用户名:密码"
 echo "========================================"
 for i in "${!USERS[@]}"; do
     USER_INFO="${USERS[$i]}"
     USERNAME="${USER_INFO%%:*}"
     PASSWORD="${USER_INFO##*:}"
-    echo "${SERVER_IP}:${PROXY_PORT}:${USERNAME}:${PASSWORD}"
+    echo "# 节点 $((i+1)): 将 <PUBLIC_PORT> 替换为 ClawCloud 显示的公网端口"
+    echo "${SERVER_IP}:<PUBLIC_PORT>:${USERNAME}:${PASSWORD}"
+    echo ""
 done
 echo "========================================"
 echo ""
-echo "💡 提示：直接复制上面的节点信息到代理工具中使用"
+echo "💡 示例："
+echo "   如果 ClawCloud 显示公网端口为 32145，则实际节点为："
+FIRST_USER="${USERS[0]}"
+FIRST_USERNAME="${FIRST_USER%%:*}"
+FIRST_PASSWORD="${FIRST_USER##*:}"
+echo "   ${SERVER_IP}:32145:${FIRST_USERNAME}:${FIRST_PASSWORD}"
 echo ""
 echo "========================================"
 echo "  🎯 服务正在启动..."
