@@ -107,4 +107,6 @@ echo "配置: 端口=$PORT, 用户数=5"
 echo ""
 
 # 启动 gost（前台运行，支持多用户认证）
-exec gost -L "socks5://${AUTH_STRING}@:${PORT}"
+# 明确绑定到 0.0.0.0 并使用 TCP 协议
+echo "绑定地址: 0.0.0.0:${PORT} (TCP)"
+exec gost -L "socks5://${AUTH_STRING}@0.0.0.0:${PORT}?tcp=true"
