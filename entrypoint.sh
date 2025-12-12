@@ -1,164 +1,110 @@
 #!/bin/bash
 
+# 设置错误处理
 set -e
 
-#============================================================
-# 3proxy 智能启动脚本
-# 功能：智能端口选择、自动多用户生成、零配置启动
-#============================================================
-
-CONFIG_FILE="/app/config/3proxy.cfg"
-USER_COUNT=5
-
 echo "========================================"
-echo "  🚀 3proxy SOCKS5 代理服务启动中..."
+echo "  SOCKS5 代理服务器启动中..."
 echo "========================================"
 
-#------------------------------------------------------------
-# 1. 获取服务器公网 IP
-#------------------------------------------------------------
-get_public_ip() {
-    local ip=""
-    
-    # 尝试方法1: ipify
-    ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || true)
-    if [ -n "$ip" ] && [ "$ip" != "" ]; then
-        echo "$ip"
-        return
-    fi
-    
-    # 尝试方法2: ifconfig.me
-    ip=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || true)
-    if [ -n "$ip" ] && [ "$ip" != "" ]; then
-        echo "$ip"
-        return
-    fi
-    
-    # 尝试方法3: icanhazip
-    ip=$(curl -s --max-time 5 https://icanhazip.com 2>/dev/null || true)
-    if [ -n "$ip" ] && [ "$ip" != "" ]; then
-        echo "$ip"
-        return
-    fi
-    
-    # 如果都失败，返回占位符
-    echo "YOUR_SERVER_IP"
+# 获取端口（Railway 会设置 PORT 环境变量）
+PORT=${PORT:-1080}
+echo "监听端口: $PORT"
+
+# 生成随机字符串函数
+generate_random_string() {
+    local length=$1
+    cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w $length | head -n 1
 }
 
+# 生成 5 个随机用户
 echo ""
-echo "🌐 正在获取服务器公网 IP..."
-SERVER_IP=$(get_public_ip)
-echo "✅ 服务器 IP: $SERVER_IP"
+echo "正在生成 5 个 SOCKS5 用户..."
+echo "========================================"
 
-#------------------------------------------------------------
-# 2. 端口配置（完全依赖环境变量）
-#------------------------------------------------------------
-if [ -n "$PORT" ]; then
-    # 使用环境变量指定的端口
-    PROXY_PORT=$PORT
-    echo "✅ 使用环境变量端口: $PROXY_PORT"
-else
-    # 使用默认固定端口（标准代理端口）
-    PROXY_PORT=3128
-    echo "⚠️  未设置 PORT 环境变量，使用默认端口: $PROXY_PORT"
-fi
-
-#------------------------------------------------------------
-# 3. 自动生成多用户凭证
-#------------------------------------------------------------
-echo ""
-echo "🔐 正在生成 $USER_COUNT 组随机用户凭证..."
+# 存储认证信息
+AUTH_STRING=""
 USERS=()
 
-for i in $(seq 1 $USER_COUNT); do
-    # 生成随机用户名（8字符）和密码（16字符）
-    USERNAME=$(openssl rand -hex 4)
-    PASSWORD=$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)
-    USERS+=("$USERNAME:$PASSWORD")
+for i in {1..5}; do
+    USERNAME="user_$(generate_random_string 8)"
+    PASSWORD="$(generate_random_string 16)"
+    
+    # 添加到认证字符串
+    if [ -z "$AUTH_STRING" ]; then
+        AUTH_STRING="${USERNAME}:${PASSWORD}"
+    else
+        AUTH_STRING="${AUTH_STRING},${USERNAME}:${PASSWORD}"
+    fi
+    
+    # 保存用户信息用于后续输出
+    USERS+=("${USERNAME}:${PASSWORD}")
+    
+    echo "用户 $i: $USERNAME / $PASSWORD"
 done
 
-#------------------------------------------------------------
-# 4. 动态生成 3proxy 配置文件
-#------------------------------------------------------------
+echo "========================================"
 echo ""
-echo "📝 生成配置文件: $CONFIG_FILE"
 
-cat > "$CONFIG_FILE" <<EOF
-# 3proxy 配置文件 - 自动生成
+# 等待一下，确保网络初始化完成
+sleep 2
 
-# 日志输出到 stdout（利用 Docker logs）
-log /dev/stdout D
-logformat "- +_L%t.%.  %N.%p %E %U %C:%c %R:%r %O %I %h %T"
+# 获取公网 IP（尝试多个服务）
+echo "正在获取服务器公网 IP..."
+PUBLIC_IP=""
 
-# DNS 服务器
-nserver 1.1.1.1
-nserver 8.8.8.8
-nscache 65536
+# 尝试多个 IP 查询服务
+IP_SERVICES=(
+    "https://api.ipify.org"
+    "https://ifconfig.me/ip"
+    "https://icanhazip.com"
+    "https://ident.me"
+)
 
-# 设置超时时间
-timeouts 1 5 30 60 180 1800 15 60
-
-# 多用户认证
-EOF
-
-# 添加所有用户
-for user in "${USERS[@]}"; do
-    echo "users $user" >> "$CONFIG_FILE"
+for service in "${IP_SERVICES[@]}"; do
+    PUBLIC_IP=$(curl -s --connect-timeout 5 "$service" 2>/dev/null | tr -d '\n' || echo "")
+    if [ ! -z "$PUBLIC_IP" ] && [[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        break
+    fi
 done
 
-cat >> "$CONFIG_FILE" <<EOF
+if [ -z "$PUBLIC_IP" ]; then
+    PUBLIC_IP="YOUR_SERVER_IP"
+    echo "⚠️  无法自动获取公网 IP，请手动替换"
+else
+    echo "✓ 检测到公网 IP: $PUBLIC_IP"
+fi
 
-# 访问控制
-auth strong
-
-# 允许所有源 IP
-allow *
-
-# SOCKS5 代理监听
-socks -p$PROXY_PORT
-EOF
-
-#------------------------------------------------------------
-# 5. 打印关键信息 Banner
-#------------------------------------------------------------
 echo ""
 echo "========================================"
-echo "  ✨ 3proxy 服务配置完成"
+echo "  🎉 SOCKS5 节点信息"
 echo "========================================"
 echo ""
-echo "📌 容器内监听端口: $PROXY_PORT"
-echo "📌 服务器IP: $SERVER_IP"
-echo ""
-echo "⚠️  ClawCloud 用户重要提示："
-echo "   1. 3proxy 在容器内监听端口: $PROXY_PORT"
-echo "   2. 请在 ClawCloud 后台查看【端口映射】中的【公网端口】"
-echo "   3. 使用节点时必须使用【公网端口】，不是 $PROXY_PORT"
-echo ""
-echo "📋 节点格式: IP:公网端口:用户名:密码"
-echo "========================================"
+
+# 输出每个用户的连接信息
 for i in "${!USERS[@]}"; do
-    USER_INFO="${USERS[$i]}"
-    USERNAME="${USER_INFO%%:*}"
-    PASSWORD="${USER_INFO##*:}"
-    echo "# 节点 $((i+1)): 将 <PUBLIC_PORT> 替换为 ClawCloud 显示的公网端口"
-    echo "${SERVER_IP}:<PUBLIC_PORT>:${USERNAME}:${PASSWORD}"
+    IFS=':' read -r username password <<< "${USERS[$i]}"
+    node_num=$((i + 1))
+    
+    echo "节点 $node_num:"
+    echo "  服务器: $PUBLIC_IP"
+    echo "  端口: $PORT"
+    echo "  用户名: $username"
+    echo "  密码: $password"
+    echo "  协议: SOCKS5"
     echo ""
+    echo "  连接链接: socks5://${username}:${password}@${PUBLIC_IP}:${PORT}"
+    echo ""
+    echo "----------------------------------------"
 done
+
+echo ""
+echo "提示: 请保存上述信息，容器重启后会生成新的随机账号"
 echo "========================================"
 echo ""
-echo "💡 示例："
-echo "   如果 ClawCloud 显示公网端口为 32145，则实际节点为："
-FIRST_USER="${USERS[0]}"
-FIRST_USERNAME="${FIRST_USER%%:*}"
-FIRST_PASSWORD="${FIRST_USER##*:}"
-echo "   ${SERVER_IP}:32145:${FIRST_USERNAME}:${FIRST_PASSWORD}"
-echo ""
-echo "========================================"
-echo "  🎯 服务正在启动..."
-echo "========================================"
+echo "🚀 正在启动 GOST SOCKS5 服务器..."
+echo "配置: 端口=$PORT, 用户数=5"
 echo ""
 
-#------------------------------------------------------------
-# 6. 启动 3proxy（前台运行）
-#------------------------------------------------------------
-exec /app/bin/3proxy "$CONFIG_FILE"
+# 启动 gost（前台运行，支持多用户认证）
+exec gost -L "socks5://${AUTH_STRING}@:${PORT}"
