@@ -85,8 +85,6 @@ echo "📝 生成配置文件: $CONFIG_FILE"
 
 cat > "$CONFIG_FILE" <<EOF
 # 3proxy 配置文件 - 自动生成
-# 前台运行（不使用 daemon）
-nolog
 
 # 日志输出到 stdout（利用 Docker logs）
 log /dev/stdout D
