@@ -15,7 +15,43 @@ echo "  🚀 3proxy SOCKS5 代理服务启动中..."
 echo "========================================"
 
 #------------------------------------------------------------
-# 1. 智能端口选择逻辑
+# 1. 获取服务器公网 IP
+#------------------------------------------------------------
+get_public_ip() {
+    local ip=""
+    
+    # 尝试方法1: ipify
+    ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || true)
+    if [ -n "$ip" ] && [ "$ip" != "" ]; then
+        echo "$ip"
+        return
+    fi
+    
+    # 尝试方法2: ifconfig.me
+    ip=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || true)
+    if [ -n "$ip" ] && [ "$ip" != "" ]; then
+        echo "$ip"
+        return
+    fi
+    
+    # 尝试方法3: icanhazip
+    ip=$(curl -s --max-time 5 https://icanhazip.com 2>/dev/null || true)
+    if [ -n "$ip" ] && [ "$ip" != "" ]; then
+        echo "$ip"
+        return
+    fi
+    
+    # 如果都失败，返回占位符
+    echo "YOUR_SERVER_IP"
+}
+
+echo ""
+echo "🌐 正在获取服务器公网 IP..."
+SERVER_IP=$(get_public_ip)
+echo "✅ 服务器 IP: $SERVER_IP"
+
+#------------------------------------------------------------
+# 2. 智能端口选择逻辑
 #------------------------------------------------------------
 if [ -n "$PORT" ]; then
     # Railway/ClawCloud 等平台会设置 PORT 环境变量
@@ -28,7 +64,7 @@ else
 fi
 
 #------------------------------------------------------------
-# 2. 自动生成多用户凭证
+# 3. 自动生成多用户凭证
 #------------------------------------------------------------
 echo ""
 echo "🔐 正在生成 $USER_COUNT 组随机用户凭证..."
@@ -42,15 +78,15 @@ for i in $(seq 1 $USER_COUNT); do
 done
 
 #------------------------------------------------------------
-# 3. 动态生成 3proxy 配置文件
+# 4. 动态生成 3proxy 配置文件
 #------------------------------------------------------------
 echo ""
 echo "📝 生成配置文件: $CONFIG_FILE"
 
 cat > "$CONFIG_FILE" <<EOF
 # 3proxy 配置文件 - 自动生成
-# 禁用 daemon 模式（前台运行）
-daemon
+# 前台运行（不使用 daemon）
+nolog
 
 # 日志输出到 stdout（利用 Docker logs）
 log /dev/stdout D
@@ -85,7 +121,7 @@ socks -p$PROXY_PORT
 EOF
 
 #------------------------------------------------------------
-# 4. 打印关键信息 Banner
+# 5. 打印关键信息 Banner
 #------------------------------------------------------------
 echo ""
 echo "========================================"
@@ -93,21 +129,19 @@ echo "  ✨ 3proxy 服务配置完成"
 echo "========================================"
 echo ""
 echo "📌 监听端口: $PROXY_PORT"
+echo "📌 服务器IP: $SERVER_IP"
 echo ""
-echo "👥 用户列表:"
+echo "📋 节点列表（格式: IP:端口:用户名:密码）:"
+echo "========================================"
 for i in "${!USERS[@]}"; do
     USER_INFO="${USERS[$i]}"
     USERNAME="${USER_INFO%%:*}"
     PASSWORD="${USER_INFO##*:}"
-    echo "   [$((i+1))] 用户名: $USERNAME | 密码: $PASSWORD"
+    echo "${SERVER_IP}:${PROXY_PORT}:${USERNAME}:${PASSWORD}"
 done
-
+echo "========================================"
 echo ""
-echo "🔗 连接串示例 (请替换 <服务器IP>):"
-FIRST_USER="${USERS[0]}"
-FIRST_USERNAME="${FIRST_USER%%:*}"
-FIRST_PASSWORD="${FIRST_USER##*:}"
-echo "   socks5://${FIRST_USERNAME}:${FIRST_PASSWORD}@<服务器IP>:${PROXY_PORT}"
+echo "💡 提示：直接复制上面的节点信息到代理工具中使用"
 echo ""
 echo "========================================"
 echo "  🎯 服务正在启动..."
@@ -115,6 +149,6 @@ echo "========================================"
 echo ""
 
 #------------------------------------------------------------
-# 5. 启动 3proxy（前台运行）
+# 6. 启动 3proxy（前台运行）
 #------------------------------------------------------------
 exec /app/bin/3proxy "$CONFIG_FILE"
