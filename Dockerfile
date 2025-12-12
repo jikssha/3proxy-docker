@@ -21,7 +21,7 @@ RUN apk add --no-cache \
     && cd / \
     && rm -rf /tmp/3proxy \
     && apk del git gcc g++ make linux-headers \
-    && apk add --no-cache bash openssl
+    && apk add --no-cache bash openssl curl
 
 # 复制启动脚本
 COPY entrypoint.sh /app/entrypoint.sh
