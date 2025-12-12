@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: your-dockerhub-username/3proxy-socks5
+  DOCKER_IMAGE: jikssha/3proxy-socks5
 
 jobs:
   build-and-push:
