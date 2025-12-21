@@ -27,8 +27,9 @@ install_gost() {
         echo ">>> 正在安装 Gost 代理工具..."
         
         # 安装依赖
+        echo ">>> 安装依赖包..."
         apt-get update -qq
-        apt-get install -y curl wget jq ufw net-tools > /dev/null 2>&1
+        apt-get install -y curl wget jq ufw net-tools gzip > /dev/null 2>&1
         
         # 检测系统架构
         ARCH=$(uname -m)
@@ -39,22 +40,110 @@ install_gost() {
             *) echo "不支持的架构: $ARCH"; exit 1 ;;
         esac
         
-        # 下载最新版本 Gost
-        GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | jq -r .tag_name)
+        # 获取最新版本
+        echo ">>> 获取 Gost 最新版本..."
+        GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | jq -r .tag_name 2>/dev/null)
+        
+        if [ -z "$GOST_VERSION" ] || [ "$GOST_VERSION" == "null" ]; then
+            echo "警告: 无法获取最新版本，使用 v2.11.5"
+            GOST_VERSION="v2.11.5"
+        fi
+        
+        echo ">>> 版本: $GOST_VERSION, 架构: $GOST_ARCH"
+        
+        # 构建下载链接
         DOWNLOAD_URL="https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/gost-${GOST_ARCH}-${GOST_VERSION}.gz"
         
-        echo ">>> 下载 Gost ${GOST_VERSION} for ${GOST_ARCH}..."
-        wget -q "$DOWNLOAD_URL" -O /tmp/gost.gz || {
-            echo "下载失败，使用备用镜像..."
-            wget -q "https://mirror.ghproxy.com/$DOWNLOAD_URL" -O /tmp/gost.gz
-        }
+        # 下载文件
+        echo ">>> 下载 Gost..."
+        rm -f /tmp/gost.gz /tmp/gost
         
-        # 解压安装
-        gunzip /tmp/gost.gz
+        if ! wget -q --show-progress "$DOWNLOAD_URL" -O /tmp/gost.gz 2>&1; then
+            echo ">>> 官方下载失败，尝试镜像..."
+            MIRROR_URL="https://mirror.ghproxy.com/$DOWNLOAD_URL"
+            if ! wget -q --show-progress "$MIRROR_URL" -O /tmp/gost.gz 2>&1; then
+                echo "错误: 下载失败，请检查网络连接"
+                exit 1
+            fi
+        fi
+        
+        # 验证下载
+        if [ ! -f /tmp/gost.gz ] || [ ! -s /tmp/gost.gz ]; then
+            echo "错误: 下载的文件无效"
+            exit 1
+        fi
+        
+        echo ">>> 解压文件..."
+        # 解压（使用 -f 强制覆盖）
+        if ! gunzip -f /tmp/gost.gz 2>&1; then
+            echo "错误: 解压失败"
+            exit 1
+        fi
+        
+        # 验证解压后的文件
+        if [ ! -f /tmp/gost ]; then
+            echo "错误: 解压后找不到 gost 文件"
+            ls -la /tmp/gost*
+            exit 1
+        fi
+        
+        # 添加执行权限
         chmod +x /tmp/gost
+        
+        # 移动到目标位置
         mv /tmp/gost "$GOST_BIN"
         
-        echo ">>> Gost 安装完成！"
+        # 验证安装
+        if [ ! -f "$GOST_BIN" ]; then
+            echo "❌ 错误: Gost 安装失败 - 文件不存在"
+            echo ""
+            echo "请尝试手动安装："
+            echo "1. 访问: https://github.com/ginuerzh/gost/releases"
+            echo "2. 下载适合您系统的版本"
+            echo "3. 解压后复制到: /usr/local/bin/gost"
+            echo "4. 添加执行权限: chmod +x /usr/local/bin/gost"
+            exit 1
+        fi
+        
+        # 验证文件大小（不应该为空）
+        local file_size=$(stat -c%s "$GOST_BIN" 2>/dev/null || stat -f%z "$GOST_BIN" 2>/dev/null)
+        if [ -z "$file_size" ] || [ "$file_size" -lt 1000000 ]; then
+            echo "❌ 错误: Gost 文件异常（大小: ${file_size} bytes）"
+            echo "预期大小应该在 8-15 MB"
+            rm -f "$GOST_BIN"
+            exit 1
+        fi
+        
+        # 测试可执行性
+        if ! "$GOST_BIN" -V >/dev/null 2>&1; then
+            echo "❌ 错误: Gost 无法执行"
+            echo ""
+            echo "可能原因："
+            echo "1. 架构不匹配（当前: $ARCH, 下载: $GOST_ARCH）"
+            echo "2. 文件损坏"
+            echo ""
+            echo "建议："
+            echo "手动下载对应架构的版本："
+            echo "  x86_64: linux-amd64"
+            echo "  ARM64:  linux-arm64"
+            echo "  ARMv7:  linux-armv7"
+            rm -f "$GOST_BIN"
+            exit 1
+        fi
+        
+        echo ">>> ✅ Gost 安装成功！"
+        echo ">>> 版本信息:"
+        "$GOST_BIN" -V
+        echo ">>> 文件大小: $(du -h "$GOST_BIN" | cut -f1)"
+    else
+        echo ">>> Gost 已安装: $GOST_BIN"
+        # 验证已安装的文件
+        if ! "$GOST_BIN" -V >/dev/null 2>&1; then
+            echo "❌ 警告: 已安装的 Gost 无法执行，重新安装..."
+            rm -f "$GOST_BIN"
+            install_gost
+            return
+        fi
     fi
     
     # 创建配置目录
@@ -108,13 +197,59 @@ EOF
 
 reload_service() {
     echo ">>> 正在重载 Gost 服务..."
+    
+    # 验证 Gost 二进制文件
+    if [ ! -f "$GOST_BIN" ]; then
+        echo "错误: Gost 程序不存在: $GOST_BIN"
+        return 1
+    fi
+    
+    if [ ! -x "$GOST_BIN" ]; then
+        echo "错误: Gost 程序没有执行权限"
+        chmod +x "$GOST_BIN"
+    fi
+    
+    # 验证配置文件
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "错误: 配置文件不存在: $CONFIG_FILE"
+        init_config
+    fi
+    
+    # 验证 JSON 格式
+    if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+        echo "错误: 配置文件 JSON 格式错误"
+        cat "$CONFIG_FILE"
+        return 1
+    fi
+    
+    # 重启服务
+    systemctl daemon-reload
     systemctl restart gost
-    sleep 2
+    sleep 3
+    
     if systemctl is-active --quiet gost; then
-        echo ">>> 服务启动成功！"
+        echo ">>> ✅ 服务启动成功！"
+        echo ">>> 监听端口:"
+        netstat -tlnp | grep gost || echo "  (正在启动中...)"
     else
-        echo ">>> [错误] Gost 启动失败，请检查配置："
-        journalctl -u gost -n 20 --no-pager
+        echo ">>> ❌ [错误] Gost 启动失败"
+        echo ""
+        echo "--- 诊断信息 ---"
+        echo "1. Gost 二进制文件:"
+        ls -lh "$GOST_BIN"
+        echo ""
+        echo "2. 配置文件内容:"
+        cat "$CONFIG_FILE"
+        echo ""
+        echo "3. 服务状态:"
+        systemctl status gost --no-pager -l
+        echo ""
+        echo "4. 最近日志:"
+        journalctl -u gost -n 30 --no-pager
+        echo ""
+        echo "5. 手动测试:"
+        echo "   尝试运行: $GOST_BIN -C $CONFIG_FILE"
+        return 1
     fi
 }
 
@@ -144,8 +279,11 @@ generate_nodes() {
         
         # 构建 Gost 节点配置
         if [ "$protocol" == "http" ]; then
-            local node="http://${user}:${pass}@:${real_port}"
+            # HTTP 代理 - 尝试三种配置格式
+            # 格式1：明确指定监听地址 0.0.0.0
+            local node="http://${user}:${pass}@0.0.0.0:${real_port}"
         else
+            # SOCKS5 代理 - 保持原有格式
             local node="socks5://${user}:${pass}@:${real_port}"
         fi
         
