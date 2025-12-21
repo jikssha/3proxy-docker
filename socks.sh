@@ -1,6 +1,6 @@
 #!/bin/bash
 # =========================================================
-# Gost Proxy Manager Pro (v1.0)
+# Gost Proxy Manager Pro (v1.1)
 # 支持 HTTP / SOCKS5 协议，基于现代化的 Gost 代理工具
 # =========================================================
 
@@ -10,7 +10,8 @@ CONFIG_DIR="/etc/gost"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 EXPORT_FILE="/root/gost_nodes.txt"
 SYSTEMD_SERVICE="/etc/systemd/system/gost.service"
-SHORTCUT_PATH="/usr/bin/gost-manager"
+SHORTCUT_PATH="/usr/bin/gost"
+SCRIPT_PATH="/usr/local/bin/gost-manager.sh"
 
 # --- 1. 环境检测与安装 ---
 check_root() {
@@ -340,7 +341,7 @@ action_uninstall() {
     
     systemctl stop gost 2>/dev/null
     systemctl disable gost 2>/dev/null
-    rm -rf "$CONFIG_DIR" "$GOST_BIN" "$SYSTEMD_SERVICE" "$EXPORT_FILE" "$SHORTCUT_PATH"
+    rm -rf "$CONFIG_DIR" "$GOST_BIN" "$SYSTEMD_SERVICE" "$EXPORT_FILE" "$SHORTCUT_PATH" "$SCRIPT_PATH"
     systemctl daemon-reload
     echo "已卸载。"
     exit 0
@@ -421,16 +422,35 @@ show_menu() {
 
 # --- 安装快捷方式 ---
 install_shortcut() {
-    if [ "$0" != "$SHORTCUT_PATH" ]; then
-        cp "$0" "$SHORTCUT_PATH"
+    # 保存脚本到固定位置
+    if [ ! -f "$SCRIPT_PATH" ]; then
+        # 从 GitHub 下载或从当前运行的脚本复制
+        if [[ "$0" == *"/dev/fd/"* ]] || [[ "$0" == "bash" ]]; then
+            # 通过管道运行，从 GitHub 下载
+            wget -q https://raw.githubusercontent.com/jikssha/Gost-Proxy-Manager/main/socks.sh -O "$SCRIPT_PATH" 2>/dev/null || {
+                # 如果下载失败，尝试镜像
+                wget -q https://mirror.ghproxy.com/https://raw.githubusercontent.com/jikssha/Gost-Proxy-Manager/main/socks.sh -O "$SCRIPT_PATH" 2>/dev/null
+            }
+        else
+            # 从本地文件复制
+            cp "$0" "$SCRIPT_PATH"
+        fi
+        chmod +x "$SCRIPT_PATH"
+    fi
+    
+    # 创建快捷命令
+    if [ ! -f "$SHORTCUT_PATH" ]; then
+        cat > "$SHORTCUT_PATH" <<'EOF'
+#!/bin/bash
+exec /usr/local/bin/gost-manager.sh "$@"
+EOF
         chmod +x "$SHORTCUT_PATH"
-        echo ">>> 快捷指令 'gost-manager' 已安装"
+        echo ">>> 快捷指令 'gost' 已安装"
     fi
 }
 
 # --- 执行入口 ---
 check_root
-install_shortcut
 install_gost
+install_shortcut
 show_menu
-
