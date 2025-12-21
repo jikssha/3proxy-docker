@@ -41,30 +41,49 @@ install_gost() {
         esac
         
         # 获取最新版本
-        echo ">>> 获取 Gost 最新版本..."
-        GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | jq -r .tag_name 2>/dev/null)
-        
-        if [ -z "$GOST_VERSION" ] || [ "$GOST_VERSION" == "null" ]; then
-            echo "警告: 无法获取最新版本，使用 v2.11.5"
-            GOST_VERSION="v2.11.5"
-        fi
+        echo ">>> 使用稳定版本 v2.11.5"
+        GOST_VERSION="v2.11.5"
         
         echo ">>> 版本: $GOST_VERSION, 架构: $GOST_ARCH"
         
-        # 构建下载链接
-        DOWNLOAD_URL="https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/gost-${GOST_ARCH}-${GOST_VERSION}.gz"
+        # 构建文件名
+        GOST_FILE="gost-${GOST_ARCH}-${GOST_VERSION}.gz"
+        
+        # 多个镜像源
+        MIRRORS=(
+            "https://ghproxy.com/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+            "https://gh.api.99988866.xyz/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+            "https://mirror.ghproxy.com/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+            "https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+        )
         
         # 下载文件
         echo ">>> 下载 Gost..."
         rm -f /tmp/gost.gz /tmp/gost
         
-        if ! wget -q --show-progress "$DOWNLOAD_URL" -O /tmp/gost.gz 2>&1; then
-            echo ">>> 官方下载失败，尝试镜像..."
-            MIRROR_URL="https://mirror.ghproxy.com/$DOWNLOAD_URL"
-            if ! wget -q --show-progress "$MIRROR_URL" -O /tmp/gost.gz 2>&1; then
-                echo "错误: 下载失败，请检查网络连接"
-                exit 1
+        DOWNLOAD_SUCCESS=false
+        for mirror in "${MIRRORS[@]}"; do
+            echo ">>> 尝试镜像: ${mirror%%/ginuerzh*}"
+            if wget -q --timeout=30 --tries=2 "$mirror" -O /tmp/gost.gz 2>&1; then
+                if [ -f /tmp/gost.gz ] && [ -s /tmp/gost.gz ]; then
+                    echo ">>> 下载成功"
+                    DOWNLOAD_SUCCESS=true
+                    break
+                fi
             fi
+            echo ">>> 此镜像失败，尝试下一个..."
+            rm -f /tmp/gost.gz
+        done
+        
+        if [ "$DOWNLOAD_SUCCESS" = false ]; then
+            echo "❌ 错误: 所有镜像源下载失败"
+            echo ""
+            echo "请手动下载："
+            echo "1. 访问: https://github.com/ginuerzh/gost/releases/tag/v2.11.5"
+            echo "2. 下载: ${GOST_FILE}"
+            echo "3. 上传到 /tmp/gost.gz"
+            echo "4. 运行: gunzip /tmp/gost.gz && chmod +x /tmp/gost && mv /tmp/gost /usr/local/bin/gost"
+            exit 1
         fi
         
         # 验证下载
