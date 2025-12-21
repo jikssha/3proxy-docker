@@ -1,6 +1,6 @@
 #!/bin/bash
 # =========================================================
-# Gost Proxy Manager Pro (v1.4 - 终极生存版)
+# Gost Proxy Manager Pro (v1.5 - 稳定版)
 # 基于 Gost 的现代化代理管理脚本，支持 HTTP / SOCKS5
 # =========================================================
 
@@ -25,7 +25,7 @@ get_public_ip() {
 
 install_gost() {
     if [ ! -f "$GOST_BIN" ]; then
-        echo ">>> [v1.4] 正在安装 Gost 代理工具..."
+        echo ">>> [v1.5] 正在安装 Gost 代理工具..."
         
         # 安装必要组件
         apt-get update -qq && apt-get install -y curl wget jq ufw net-tools gzip > /dev/null 2>&1
@@ -38,17 +38,19 @@ install_gost() {
             *) GOST_ARCH="linux-amd64" ;;
         esac
         
-        GOST_VERSION="v2.11.5"
-        GOST_FILE="gost-${GOST_ARCH}-${GOST_VERSION}.gz"
-        echo ">>> 目标版本: $GOST_VERSION ($GOST_ARCH)"
+        # 修正：Gost 的 tag 带有 v，但文件名通常不带 v
+        GOST_TAG="v2.11.5"
+        GOST_VER="2.11.5"
+        GOST_FILE="gost-${GOST_ARCH}-${GOST_VER}.gz"
         
-        # 终极镜像列表
+        echo ">>> 目标版本: $GOST_TAG ($GOST_ARCH)"
+        
+        # 优化镜像列表
         MIRRORS=(
-            "https://gh-proxy.com/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
-            "https://github.moeyy.xyz/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
-            "https://gh.api.99988866.xyz/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
-            "https://mirror.ghproxy.com/https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
-            "https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+            "https://ghp.ci/https://github.com/ginuerzh/gost/releases/download/${GOST_TAG}/${GOST_FILE}"
+            "https://mirror.ghproxy.com/https://github.com/ginuerzh/gost/releases/download/${GOST_TAG}/${GOST_FILE}"
+            "https://github.moeyy.xyz/https://github.com/ginuerzh/gost/releases/download/${GOST_TAG}/${GOST_FILE}"
+            "https://gh-proxy.com/https://github.com/ginuerzh/gost/releases/download/${GOST_TAG}/${GOST_FILE}"
         )
         
         DOWNLOAD_SUCCESS=false
@@ -56,24 +58,20 @@ install_gost() {
             echo -e "\n>>> 尝试源: $(echo $mirror | cut -d'/' -f3)"
             rm -f /tmp/gost.gz
             
-            # 使用 wget 下载并显示进度，增加耐心 (120秒超时)
-            if wget --no-check-certificate --timeout=120 --tries=3 "$mirror" -O /tmp/gost.gz; then
+            # 使用 wget 下载，展示进度
+            if wget --no-check-certificate --timeout=60 --tries=2 "$mirror" -O /tmp/gost.gz; then
                 local fsize=$(stat -c%s "/tmp/gost.gz" 2>/dev/null || echo 0)
-                # 必须大于 5MB 才认为是正常的二进制包 (实际约9MB)
-                if [ "$fsize" -gt 5000000 ] && gzip -t /tmp/gost.gz > /dev/null 2>&1; then
-                    echo ">>> [校验通过] 准备解压安装..."
+                if [ "$fsize" -gt 3000000 ] && gzip -t /tmp/gost.gz > /dev/null 2>&1; then
+                    echo ">>> [校验成功] 准备解压安装..."
                     DOWNLOAD_SUCCESS=true && break
-                else
-                    echo ">>> [警告] 文件内容检测未通过，可能是无效的 HTML 劫持页面。"
                 fi
-            else
-                echo ">>> [失败] 无法连接到该镜像源。"
             fi
+            echo ">>> 该源无效 (可能是 404 或超时)，尝试下一个..."
         done
 
         if [ "$DOWNLOAD_SUCCESS" = false ]; then
-            echo -e "\n❌ 无法完成安装: 您的网络环境非常特殊，所有已知的加速镜像均无法提供有效下载。"
-            echo "建议手动执行：cd /tmp && wget --no-check-certificate https://gh-proxy.com/https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-v2.11.5.gz"
+            echo -e "\n❌ 无法自动下载 Gost 程序。请确认以下链接是否可以手动访问："
+            echo "https://github.com/ginuerzh/gost/releases/download/${GOST_TAG}/${GOST_FILE}"
             exit 1
         fi
         
@@ -131,7 +129,6 @@ generate_nodes() {
         local p="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)"
         local rp=$((port + i)); [ "$mode" == "1" ] && rp=$port
         
-        # 兼容性最高 的配置格式
         local node="${proto}://${u}:${p}@:${rp}"
         jq ".ServeNodes += [\"$node\"]" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
         echo "$PUB_IP:$rp:$u:$p:$proto" >> "$EXPORT_FILE"
@@ -153,10 +150,7 @@ action_create() {
 install_shortcut() {
     wget -q "$RAW_URL" -O "$SCRIPT_PATH" || curl -fsSL "$RAW_URL" -o "$SCRIPT_PATH"
     chmod +x "$SCRIPT_PATH"
-    if [ ! -f "$SHORTCUT_PATH" ]; then
-        echo -e "#!/bin/bash\nexec $SCRIPT_PATH \"\$@\"" > "$SHORTCUT_PATH"
-        chmod +x "$SHORTCUT_PATH"
-    fi
+    [ ! -f "$SHORTCUT_PATH" ] && echo -e "#!/bin/bash\nexec $SCRIPT_PATH \"\$@\"" > "$SHORTCUT_PATH" && chmod +x "$SHORTCUT_PATH"
 }
 
 # --- 主入口 ---
@@ -165,7 +159,7 @@ install_gost
 install_shortcut
 while true; do
     clear
-    echo "=== Gost Manager Pro v1.4 ==="
+    echo "=== Gost Manager Pro v1.5 ==="
     echo "1. ➕ 创建节点"
     echo "2. 📜 查看节点"
     echo "3. 🧹 清空配置"
@@ -178,7 +172,7 @@ while true; do
         2) clear; cat "$EXPORT_FILE"; read -p "回车继续..." ;;
         3) init_config; : > "$EXPORT_FILE"; reload_service; read -p "已清空..." ;;
         4) journalctl -u gost -n 20 --no-pager; read -p "回车继续..." ;;
-        5) systemctl stop gost; rm -rf "$GOST_BIN" "$CONFIG_DIR" "$SYSTEMD_SERVICE" "$SHORTCUT_PATH"; exit 0 ;;
+        5) systemctl stop gost; rm -rf "$GOST_BIN" "$CONFIG_DIR" "$SYSTEMD_SERVICE" "$SHORTCUT_PATH" "$SCRIPT_PATH"; exit 0 ;;
         0) exit 0 ;;
     esac
 done
