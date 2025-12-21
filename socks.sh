@@ -60,26 +60,36 @@ install_gost() {
 
         for mirror in "${MIRRORS[@]}"; do
             echo ">>> 尝试下载源: $(echo $mirror | cut -d'/' -f3)"
-            # 尝试 wget
-            wget --no-check-certificate --timeout=15 --tries=2 "$mirror" -O /tmp/gost.gz > /dev/null 2>&1
-            if [ -s /tmp/gost.gz ]; then
-                DOWNLOAD_SUCCESS=true && break
-            fi
-            # 如果 wget 失败，尝试 curl
-            curl -L -k --connect-timeout 15 --retry 2 "$mirror" -o /tmp/gost.gz > /dev/null 2>&1
-            if [ -s /tmp/gost.gz ]; then
-                DOWNLOAD_SUCCESS=true && break
-            fi
-            echo ">>> 该源连接超时，尝试下一个..."
             rm -f /tmp/gost.gz
+            
+            # 尝试下载 (增加 -L 跟随重定向，-k 忽略 SSL)
+            if curl -L -k --connect-timeout 15 --retry 1 "$mirror" -o /tmp/gost.gz > /dev/null 2>&1 || \
+               wget --no-check-certificate --timeout=15 --tries=2 "$mirror" -O /tmp/gost.gz > /dev/null 2>&1; then
+                
+                # --- 核心校验：检查文件大小 (必须大于 1MB) ---
+                local fsize=$(stat -c%s "/tmp/gost.gz" 2>/dev/null || echo 0)
+                if [ "$fsize" -lt 1000000 ]; then
+                    echo ">>> [跳过] 下载的文件大小异常，可能是无效的 HTML 页面。"
+                    continue
+                fi
+
+                # --- 核心校验：检查是否为有效的 Gzip 格式 ---
+                if gzip -t /tmp/gost.gz > /dev/null 2>&1; then
+                    DOWNLOAD_SUCCESS=true && echo ">>> 下载检测通过，开始安装..." && break
+                else
+                    echo ">>> [跳过] 文件格式校验失败（非有效 Gzip 数据）。"
+                fi
+            fi
+            echo ">>> 该源无效或被限流，尝试下一个..."
         done
 
         if [ "$DOWNLOAD_SUCCESS" = false ]; then
-            echo "❌ 严重错误: 所有下载镜像均失效，请检查 VPS 的国际网络连接。"
+            echo "❌ 严重错误: 所有下载镜像均失效。"
+            echo "可能原因：您的 VPS IP 被 GitHub 加速镜像供应商集体拉黑。"
+            echo "建议：请尝试在 VPS 上运行 'ping ghproxy.net' 检查连接。"
             exit 1
         fi
         
-        echo ">>> 下载成功，正在解压安装..."
         gunzip -f /tmp/gost.gz
         mv /tmp/gost "$GOST_BIN"
         chmod +x "$GOST_BIN"
